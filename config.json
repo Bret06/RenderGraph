@@ -1,0 +1,11 @@
+{
+  "directory" : "Minecraft Classic",
+  "id": "12",
+  "start": "00:00:42",
+  "end": "00:35:02",
+  "volume": {
+    "video": 8.1,
+    "voice": 8
+  },
+  "fadeDuration": 2
+}

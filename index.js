@@ -11,26 +11,32 @@ async function processVideo() {
     }
 
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const { directory, id, start, end, volume, fadeDuration } = config;
+    const { directory, id, cuts, volume, fadeDuration } = config;
 
-    const inputVideo = path.join(__dirname, "..", directory, id, "video.mp4");
-    const inputAudio = path.join(__dirname, "..", directory, id, "voice.wav");
-    const output = path.join(__dirname, "..", directory, id, "output.mp4");
-
-    // Place a copy of the config in the output folder for reference.
-    console.log("📄 Saving config to output folder...");
-    await fsp.writeFile(path.join(__dirname, "..", directory, id, "config.json"), JSON.stringify(config, null, 2), "utf8");
-
-    // Check if the folder we are calling to has a script and if it does then run it.
-    if (fs.existsSync(path.join(__dirname, "..", directory, "script.js"))) {
-        const script = require(path.join(__dirname, "..", directory, "script.js"));
-        await script(config);
-    }
-
-    if (!inputVideo || !inputAudio || !output) {
-        console.error("❌ Config must include inputVideo, inputAudio, and output paths.");
+    if (!Array.isArray(cuts) || cuts.length === 0) {
+        console.error("❌ Config must include a non-empty cuts array.");
         return;
     }
+
+    const fadeIn = fadeDuration.in ?? 0;
+    const fadeOut = fadeDuration.out ?? 0;
+    const crossfade = fadeDuration.crossfade ?? 0;
+
+    const baseDir = path.join(__dirname, "..", directory, id);
+    const inputVideo = path.join(baseDir, "video.mp4");
+    const inputVoice = path.join(baseDir, "voice.wav");
+    const output = path.join(baseDir, "output.mp4");
+
+    if (!fs.existsSync(inputVideo) || !fs.existsSync(inputVoice)) {
+        console.error("❌ Missing input video or voice file.");
+        return;
+    }
+
+    await fsp.writeFile(
+        path.join(baseDir, "config.json"),
+        JSON.stringify(config, null, 2),
+        "utf8"
+    );
 
     function toSeconds(ts) {
         const p = ts.split(":").map(Number);
@@ -38,47 +44,96 @@ async function processVideo() {
         return p[0] * 3600 + p[1] * 60 + p[2];
     }
 
-    const startSec = toSeconds(start);
-    const endSec = toSeconds(end);
-    const duration = endSec - startSec;
+    const cmd = ffmpeg();
 
-    if (duration <= 0) {
-        console.error("❌ End time must be after start time.");
-        return;
-    }
+    // ---------- PRE-SEEKED INPUTS ----------
+    const durations = [];
 
-    console.log(`🎬 Video: ${inputVideo}`);
-    console.log(`🎧 Voice: ${inputAudio}`);
-    console.log(`⏱ ${start} → ${end} | Fade: ${fadeDuration}s`);
-    console.log(`💾 Output: ${output}`);
+    cuts.forEach(cut => {
+        const start = toSeconds(cut.start);
+        const end = toSeconds(cut.end);
+        const dur = end - start;
 
-    // Combined filter
-    const filterComplex = [
-        `[0:v]trim=start=${startSec}:end=${endSec},setpts=PTS-STARTPTS,fade=t=in:st=0:d=${fadeDuration},fade=t=out:st=${duration - fadeDuration}:d=${fadeDuration},scale=2560:1440[v]`,
-        `[0:a]atrim=start=${startSec}:end=${endSec},asetpts=PTS-STARTPTS,volume=${volume.video}dB[orig_a]`,
-        `[1:a]atrim=start=${startSec}:end=${endSec},asetpts=PTS-STARTPTS,volume=${volume.voice}dB[voice_a]`,
-        `[orig_a][voice_a]amix=inputs=2:duration=shortest:weights=1 1[mixed_a]`
-    ];
+        if (dur <= 0) throw new Error("❌ Cut end must be after start");
 
+        durations.push(dur);
 
-    ffmpeg()
-        .input(inputVideo)
-        .input(inputAudio)
-        .complexFilter(filterComplex)
+        cmd.input(inputVideo).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+        cmd.input(inputVoice).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+    });
+
+    const filter = [];
+    let vLast = null;
+    let aLast = null;
+    let vaLast = null;
+
+    cuts.forEach((_, i) => {
+        const vIn = i * 2;
+        const aIn = i * 2 + 1;
+        const dur = durations[i];
+
+        filter.push(
+            `[${vIn}:v]setpts=PTS-STARTPTS,` +
+            `fade=t=in:st=0:d=${fadeIn},` +
+            `fade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}[v${i}]`
+        );
+
+        filter.push(`[${vIn}:a]asetpts=PTS-STARTPTS[a${i}]`);
+        filter.push(`[${aIn}:a]asetpts=PTS-STARTPTS[va${i}]`);
+
+        if (i === 0) {
+            vLast = `v${i}`;
+            aLast = `a${i}`;
+            vaLast = `va${i}`;
+            return;
+        }
+
+        // ---------- VIDEO CROSSFADE ----------
+        filter.push(
+            `[${vLast}][v${i}]xfade=transition=fade:duration=${crossfade}:offset=${durations
+                .slice(0, i)
+                .reduce((a, b) => a + b, 0) - crossfade}[vxf${i}]`
+        );
+
+        // ---------- AUDIO CROSSFADE ----------
+        filter.push(
+            `[${aLast}][a${i}]acrossfade=d=${crossfade}[axf${i}]`
+        );
+
+        filter.push(
+            `[${vaLast}][va${i}]acrossfade=d=${crossfade}[vaxf${i}]`
+        );
+
+        vLast = `vxf${i}`;
+        aLast = `axf${i}`;
+        vaLast = `vaxf${i}`;
+    });
+
+    // ---------- MIX AUDIO ----------
+    filter.push(
+        `[${aLast}][${vaLast}]amix=inputs=2:weights=${volume.video} ${volume.voice}:normalize=0[mixed_a]`
+    );
+
+    cmd
+        .complexFilter(filter)
         .outputOptions([
-            "-map [v]",
-            "-map [mixed_a]",
-            "-c:v h264_nvenc",
-            "-preset p3",
-            "-cq 18",
-            "-pix_fmt yuv420p",
-            "-r 60",
-            "-c:a aac",
-            "-b:a 320k",
+            "-map", `[${vLast}]`,
+            "-map", "[mixed_a]",
+            "-c:v", "h264_nvenc",
+            "-preset", "p3",
+            "-cq", "18",
+            "-pix_fmt", "yuv420p",
+            "-r", "60",
+            "-c:a", "aac",
+            "-b:a", "320k",
             "-shortest"
         ])
-        .on("start", cmd => console.log("▶️ Running FFmpeg:\n", cmd))
-        .on("progress", p => process.stdout.write(`\rProcessing: ${p.percent?.toFixed(1)}%`))
+        .on("start", cmdLine => console.log("▶️ FFmpeg:\n", cmdLine))
+        .on("progress", p => {
+            if (p.percent != null) {
+                process.stdout.write(`\rProcessing: ${p.percent.toFixed(1)}%`);
+            }
+        })
         .on("error", err => console.error("\n❌ FFmpeg error:", err.message))
         .on("end", () => console.log(`\n✅ Done! Saved as ${output}`))
         .save(output);

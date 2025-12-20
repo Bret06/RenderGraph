@@ -1,11 +1,23 @@
 {
-  "directory" : "Minecraft Classic",
-  "id": "12",
-  "start": "00:00:42",
-  "end": "00:35:02",
+  "directory": "Call of The Forest",
+  "id": "2",
+  "cuts": [
+    {
+      "start": "00:01:13",
+      "end": "00:04:54"
+    },
+    {
+      "start": "00:08:34",
+      "end": "00:35:41"
+    }
+  ],
   "volume": {
-    "video": 8.1,
-    "voice": 8
+    "video": 1,
+    "voice": 1.25
   },
-  "fadeDuration": 2
+  "fadeDuration": {
+    "in": 2,
+    "out": 2,
+    "crossfade": 1
+  }
 }

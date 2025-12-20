@@ -32,6 +32,8 @@ async function processVideo() {
         return;
     }
 
+    // Place a copy of the config in the output folder for reference. 
+    console.log("📄 Saving config to output folder...");
     await fsp.writeFile(
         path.join(baseDir, "config.json"),
         JSON.stringify(config, null, 2),

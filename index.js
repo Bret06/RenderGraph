@@ -38,6 +38,12 @@ async function processVideo() {
         "utf8"
     );
 
+    // Check if the folder we are calling to has a script and if it does then run it. 
+    if (fs.existsSync(path.join(__dirname, "..", directory, "script.js"))) {
+        const script = require(path.join(__dirname, "..", directory, "script.js"));
+        await script(config);
+    }
+
     function toSeconds(ts) {
         const p = ts.split(":").map(Number);
         if (p.length !== 3) throw new Error("Timestamp must be HH:MM:SS");

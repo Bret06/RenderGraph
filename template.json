@@ -1,0 +1,25 @@
+{
+  "cuts": [
+    {
+      "video": { "id": "disclaimer.mp4", "volume": 1 },
+      "start": "00:00:00",
+      "end": "00:00:06"
+    },
+    {
+      "video": { "id": "video.mp4", "volume": 0.75 },
+      "audio": [
+        {
+          "id": "voice.wav",
+          "volume": 1.25
+        }
+      ],
+      "start": "00:00:00",
+      "end": "00:01:00"
+    }
+  ],
+  "fade_duration": {
+    "in": 2,
+    "out": 2,
+    "crossfade": 1
+  }
+}

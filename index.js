@@ -2,100 +2,79 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const ffmpeg = require("fluent-ffmpeg");
-const readline = require('readline');
+const readline = require("readline");
 const path = require("path");
 
-// Create readline interface to get input from the console
+// Create readline interface
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
+
 // Utility function to convert rl.question to a promise-based version
 function askQuestion(query) {
-    return new Promise((resolve) => {
-        rl.question(query, resolve);
-    });
+    return new Promise(resolve => rl.question(query, resolve));
 }
 
 (async () => {
-    // Define a path to the video directory.
     const videoDirPath = path.join(__dirname, "..");
-    // Grab a list of all the folders in the video directory.
-    const videoDirs = (await fsp.readdir(videoDirPath, { withFileTypes: true }))
-        .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name);
-    // Log each directory on a new line with a number for selection.
-    console.log("Available directories:");
-    videoDirs.forEach((dir, index) => {
-        console.log(`  [${index + 1}] ${dir}`);
-    });
-    // Prompt the user for the location of the video.
-    const directoryPrompt = await askQuestion('Please enter the directory of the project > ');
-    const directory = videoDirs[Number(directoryPrompt) - 1];
-    const id = await askQuestion('Please enter the id of the project > ');
 
-    // Define paths.
+    const videoDirs = (await fsp.readdir(videoDirPath, { withFileTypes: true }))
+        .filter(d => d.isDirectory())
+        .map(d => d.name);
+
+    console.log("Available directories:");
+    videoDirs.forEach((dir, i) => console.log(`  [${i + 1}] ${dir}`));
+
+    const directoryPrompt = await askQuestion("Please enter the directory of the project > ");
+    const directory = videoDirs[Number(directoryPrompt) - 1];
+    const id = await askQuestion("Please enter the id of the project > ");
+
+    rl.close();
+
     const baseDir = path.join(videoDirPath, directory, id);
     const output = path.join(baseDir, "output.mp4");
-    // Define the path to the config file.
     const configPath = path.join(baseDir, "config.json");
 
-    // Make sure the config file exists.
     if (!fs.existsSync(configPath)) {
         console.error("❌ Missing config.json!");
         return;
     }
-    // If the config file exists, read and parse it.
+
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const { cuts, volume, fade_duration } = config;
-    // Make sure the config has a cuts array.
+    const { cuts, fade_duration } = config;
+
     if (!Array.isArray(cuts) || cuts.length === 0) {
         console.error("❌ Config must include a non-empty cuts array.");
         return;
     }
 
-    // Define the fade durations with defaults.
-    const fadeIn = fade_duration.in ?? 0;
-    const fadeOut = fade_duration.out ?? 0;
-    const crossfade = fade_duration.crossfade ?? 0;
+    const fadeIn = fade_duration?.in ?? 0;
+    const fadeOut = fade_duration?.out ?? 0;
+    const crossfade = fade_duration?.crossfade ?? 0;
 
-    // Check if the folder we are calling to has a script and if it does then run it. 
-    if (fs.existsSync(path.join(__dirname, "..", directory, "script.js"))) {
-        const script = require(path.join(__dirname, "..", directory, "script.js"));
-        await script(config);
+    const scriptPath = path.join(__dirname, "..", directory, "script.js");
+    if (fs.existsSync(scriptPath)) {
+        await require(scriptPath)(config);
     }
 
-    // Define the function that can be used to convert HH:MM:SS to seconds.
     function toSeconds(ts) {
         const p = ts.split(":").map(Number);
         if (p.length !== 3) throw new Error("Timestamp must be HH:MM:SS");
         return p[0] * 3600 + p[1] * 60 + p[2];
     }
-    // Define a function that can be used to get volume for a specific file.
-    function getVolume(volumes, filename) {
-        return typeof volumes?.[filename] === "number"
-            ? volumes[filename]
-            : 1.0;
-    }
 
-    // Start building the ffmpeg command.
     const cmd = ffmpeg();
-
-    // Create the durations array to hold each cut's duration.
     const durations = [];
+    const cutInputs = [];
+    let inputIndex = 0;
 
-    // Make sure each cut has video and voice.
+    // ---------------- INPUTS ----------------
     cuts.forEach((cut, i) => {
-        if (!cut.video) {
-            throw new Error(`❌ Cut ${i} missing "video"`);
+        if (!cut.video?.id) {
+            throw new Error(`❌ Cut ${i} missing video.id`);
         }
-        if (!cut.voice) {
-            throw new Error(`❌ Cut ${i} missing "voice"`);
-        }
-    });
 
-
-    cuts.forEach((cut, i) => {
         const start = toSeconds(cut.start);
         const end = toSeconds(cut.end);
         const dur = end - start;
@@ -104,110 +83,107 @@ function askQuestion(query) {
             throw new Error(`❌ Cut ${i}: end must be after start`);
         }
 
-        const videoPath = path.join(baseDir, cut.video);
-        const voicePath = path.join(baseDir, cut.voice);
-
-        if (!fs.existsSync(videoPath)) {
-            throw new Error(`❌ Cut ${i}: video not found → ${cut.video}`);
-        }
-
         durations.push(dur);
 
-        // 🎬 VIDEO — uses cut.start
-        cmd.input(videoPath).inputOptions([
-            `-ss ${start}`,
-            `-t ${dur}`
-        ]);
+        // 🎬 VIDEO
+        const videoPath = path.join(baseDir, cut.video.id);
+        if (!fs.existsSync(videoPath)) {
+            throw new Error(`❌ Cut ${i}: video not found → ${cut.video.id}`);
+        }
 
-        // 🎙️ VOICE — uses SAME timestamps, but chosen timeline
-        cmd.input(voicePath).inputOptions([
-            `-ss ${start}`,
-            `-t ${dur}`
-        ]);
+        const videoIndex = inputIndex++;
+        cmd.input(videoPath).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+
+        // 🎙️ AUDIO — ALWAYS include video audio
+        const audioIndices = [];
+
+        // 1️⃣ Video’s embedded audio (base layer)
+        audioIndices.push(videoIndex);
+
+        // Normalize structure
+        if (!Array.isArray(cut.audio)) {
+            cut.audio = [];
+        }
+
+        // 2️⃣ Extra audio tracks (voice, music, etc.)
+        cut.audio.forEach(track => {
+            const audioPath = path.join(baseDir, track.id);
+            if (!fs.existsSync(audioPath)) {
+                throw new Error(`❌ Cut ${i}: audio not found → ${track.id}`);
+            }
+
+            audioIndices.push(inputIndex++);
+            cmd.input(audioPath).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+        });
+
+
+        cutInputs.push({ videoIndex, audioIndices });
     });
 
-
+    // ---------------- FILTER GRAPH ----------------
     const filter = [];
     let vLast = null;
     let aLast = null;
-    let vaLast = null;
 
-    cuts.forEach((_, i) => {
-        const vIn = i * 2;
-        const aIn = i * 2 + 1;
+    cuts.forEach((cut, i) => {
+        const { videoIndex, audioIndices } = cutInputs[i];
         const dur = durations[i];
 
+        // 🎬 VIDEO
         filter.push(
-            `[${vIn}:v]setpts=PTS-STARTPTS,` +
+            `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
             `fade=t=in:st=0:d=${fadeIn},` +
-            `fade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}[v${i}]`
+            `fade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
+            `[v${i}]`
         );
 
-        const videoVol = getVolume(volume, cuts[i].video);
-        const voiceVol = getVolume(volume, cuts[i].voice);
+        // 🎙️ AUDIO
+        audioIndices.forEach((aIdx, j) => {
+            const vol =
+                j === 0
+                    ? cut.video.volume ?? 1.0
+                    : cut.audio[j - 1]?.volume ?? 1.0;
 
+            filter.push(
+                `[${aIdx}:a]asetpts=PTS-STARTPTS,` +
+                `volume=${vol},` +
+                `afade=t=in:st=0:d=${fadeIn},` +
+                `afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
+                `[a${i}_${j}]`
+            );
+        });
+
+        const mixInputs = audioIndices.map((_, j) => `[a${i}_${j}]`).join("");
         filter.push(
-            `[${vIn}:a]asetpts=PTS-STARTPTS,` +
-            `volume=${videoVol},` +
-            `afade=t=in:st=0:d=${fadeIn},` +
-            `afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
-            `[a${i}]`
+            `${mixInputs}amix=inputs=${audioIndices.length}:normalize=0[a${i}]`
         );
-
-        filter.push(
-            `[${aIn}:a]asetpts=PTS-STARTPTS,` +
-            `volume=${voiceVol},` +
-            `afade=t=in:st=0:d=${fadeIn},` +
-            `afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
-            `[va${i}]`
-        );
-
-
 
         if (i === 0) {
             vLast = `v${i}`;
             aLast = `a${i}`;
-            vaLast = `va${i}`;
             return;
         }
 
-        console.log(
-            `xfade ${i}: offset=${durations.slice(0, i).reduce((a, b) => a + b, 0) - crossfade * i}`
-        );
+        const offset =
+            durations.slice(0, i).reduce((a, b) => a + b, 0) - crossfade * i;
 
-
-        // ---------- VIDEO CROSSFADE ----------
         filter.push(
-            `[${vLast}][v${i}]xfade=transition=fade:duration=${crossfade}:offset=${durations
-                .slice(0, i)
-                .reduce((a, b) => a + b, 0) - crossfade * i}[vxf${i}]`
+            `[${vLast}][v${i}]xfade=transition=fade:duration=${crossfade}:offset=${offset}[vxf${i}]`
         );
-
-        // ---------- AUDIO CROSSFADE ----------
         filter.push(
             `[${aLast}][a${i}]acrossfade=d=${crossfade}[axf${i}]`
         );
 
-        filter.push(
-            `[${vaLast}][va${i}]acrossfade=d=${crossfade}[vaxf${i}]`
-        );
-
         vLast = `vxf${i}`;
         aLast = `axf${i}`;
-        vaLast = `vaxf${i}`;
     });
 
-    // ---------- MIX AUDIO ----------
-    filter.push(
-        `[${aLast}][${vaLast}]amix=inputs=2:normalize=0[mixed_a]`
-    );
-
-
+    // ---------------- OUTPUT ----------------
     cmd
         .complexFilter(filter)
         .outputOptions([
             "-map", `[${vLast}]`,
-            "-map", "[mixed_a]",
+            "-map", `[${aLast}]`,
             "-c:v", "h264_nvenc",
             "-preset", "p3",
             "-cq", "18",
@@ -226,6 +202,4 @@ function askQuestion(query) {
         .on("error", err => console.error("\n❌ FFmpeg error:", err.message))
         .on("end", () => console.log(`\n✅ Done! Saved as ${output}`))
         .save(output);
-
-        return;
 })();

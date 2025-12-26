@@ -179,6 +179,15 @@ function askQuestion(query) {
     });
 
     // ---------------- OUTPUT ----------------
+
+    const totalDuration =
+        durations.reduce((a, b) => a + b, 0) -
+        crossfade * (durations.length - 1);
+
+    function timemarkToSeconds(t) {
+        const [h, m, s] = t.split(":");
+        return (+h) * 3600 + (+m) * 60 + parseFloat(s);
+    }
     cmd
         .complexFilter(filter)
         .outputOptions([
@@ -195,9 +204,14 @@ function askQuestion(query) {
         ])
         .on("start", cmdLine => console.log("▶️ FFmpeg:\n", cmdLine))
         .on("progress", p => {
-            if (p.percent != null) {
-                process.stdout.write(`\rProcessing: ${p.percent.toFixed(1)}%`);
-            }
+            if (!p.timemark) return;
+
+            const current = timemarkToSeconds(p.timemark);
+            const percent = Math.min(100, (current / totalDuration) * 100);
+
+            process.stdout.write(
+                `\rProcessing: ${percent.toFixed(1)}% (${current.toFixed(1)}s / ${totalDuration.toFixed(1)}s)`
+            );
         })
         .on("error", err => console.error("\n❌ FFmpeg error:", err.message))
         .on("end", () => console.log(`\n✅ Done! Saved as ${output}`))

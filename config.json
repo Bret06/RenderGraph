@@ -1,10 +1,31 @@
 {
-  "directory": "Minecraft Classic",
-  "id": "23",
-  "cuts": [{ "start": "00:01:10", "end": "00:29:38" }],
+  "directory": "Species Unknown",
+  "id": "2",
+  "cuts": [
+    {
+      "video": "disclaimer.mp4",
+      "voice": "dead.wav",
+      "start": "00:00:00",
+      "end": "00:00:06"
+    },
+    {
+      "video": "video.mp4",
+      "voice": "voice.wav",
+      "start": "00:02:10",
+      "end": "00:27:12"
+    },
+        {
+      "video": "video.mp4",
+      "voice": "voice.wav",
+      "start": "00:46:18",
+      "end": "01:07:11"
+    }
+  ],
   "volume": {
-    "video": 0.5,
-    "voice": 1.25
+    "video.mp4": 0.75,
+    "voice.wav": 1.25,
+    "disclaimer.mp4": 1,
+    "dead.wav": 0
   },
   "fadeDuration": {
     "in": 2,

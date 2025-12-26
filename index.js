@@ -23,14 +23,8 @@ async function processVideo() {
     const crossfade = fadeDuration.crossfade ?? 0;
 
     const baseDir = path.join(__dirname, "..", directory, id);
-    const inputVideo = path.join(baseDir, "video.mp4");
-    const inputVoice = path.join(baseDir, "voice.wav");
     const output = path.join(baseDir, "output.mp4");
 
-    if (!fs.existsSync(inputVideo) || !fs.existsSync(inputVoice)) {
-        console.error("❌ Missing input video or voice file.");
-        return;
-    }
 
     // Place a copy of the config in the output folder for reference. 
     console.log("📄 Saving config to output folder...");
@@ -52,23 +46,59 @@ async function processVideo() {
         return p[0] * 3600 + p[1] * 60 + p[2];
     }
 
+    function getVolume(volumes, filename) {
+        return typeof volumes?.[filename] === "number"
+            ? volumes[filename]
+            : 1.0;
+    }
+
+
     const cmd = ffmpeg();
 
     // ---------- PRE-SEEKED INPUTS ----------
     const durations = [];
 
-    cuts.forEach(cut => {
+    cuts.forEach((cut, i) => {
+        if (!cut.video) {
+            throw new Error(`❌ Cut ${i} missing "video"`);
+        }
+        if (!cut.voice) {
+            throw new Error(`❌ Cut ${i} missing "voice"`);
+        }
+    });
+
+
+    cuts.forEach((cut, i) => {
         const start = toSeconds(cut.start);
         const end = toSeconds(cut.end);
         const dur = end - start;
 
-        if (dur <= 0) throw new Error("❌ Cut end must be after start");
+        if (dur <= 0) {
+            throw new Error(`❌ Cut ${i}: end must be after start`);
+        }
+
+        const videoPath = path.join(baseDir, cut.video);
+        const voicePath = path.join(baseDir, cut.voice);
+
+        if (!fs.existsSync(videoPath)) {
+            throw new Error(`❌ Cut ${i}: video not found → ${cut.video}`);
+        }
 
         durations.push(dur);
 
-        cmd.input(inputVideo).inputOptions([`-ss ${start}`, `-t ${dur}`]);
-        cmd.input(inputVoice).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+        // 🎬 VIDEO — uses cut.start
+        cmd.input(videoPath).inputOptions([
+            `-ss ${start}`,
+            `-t ${dur}`
+        ]);
+
+        // 🎙️ VOICE — uses SAME timestamps, but chosen timeline
+        cmd.input(voicePath).inputOptions([
+            `-ss ${start}`,
+            `-t ${dur}`
+        ]);
     });
+
 
     const filter = [];
     let vLast = null;
@@ -86,8 +116,26 @@ async function processVideo() {
             `fade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}[v${i}]`
         );
 
-        filter.push(`[${vIn}:a]asetpts=PTS-STARTPTS[a${i}]`);
-        filter.push(`[${aIn}:a]asetpts=PTS-STARTPTS[va${i}]`);
+        const videoVol = getVolume(volume, cuts[i].video);
+        const voiceVol = getVolume(volume, cuts[i].voice);
+
+        filter.push(
+            `[${vIn}:a]asetpts=PTS-STARTPTS,` +
+            `volume=${videoVol},` +
+            `afade=t=in:st=0:d=${fadeIn},` +
+            `afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
+            `[a${i}]`
+        );
+
+        filter.push(
+            `[${aIn}:a]asetpts=PTS-STARTPTS,` +
+            `volume=${voiceVol},` +
+            `afade=t=in:st=0:d=${fadeIn},` +
+            `afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
+            `[va${i}]`
+        );
+
+
 
         if (i === 0) {
             vLast = `v${i}`;
@@ -119,8 +167,9 @@ async function processVideo() {
 
     // ---------- MIX AUDIO ----------
     filter.push(
-        `[${aLast}][${vaLast}]amix=inputs=2:weights=${volume.video} ${volume.voice}:normalize=0[mixed_a]`
+        `[${aLast}][${vaLast}]amix=inputs=2:normalize=0[mixed_a]`
     );
+
 
     cmd
         .complexFilter(filter)

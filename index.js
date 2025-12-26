@@ -144,11 +144,16 @@ async function processVideo() {
             return;
         }
 
+        console.log(
+            `xfade ${i}: offset=${durations.slice(0, i).reduce((a, b) => a + b, 0) - crossfade * i}`
+        );
+
+
         // ---------- VIDEO CROSSFADE ----------
         filter.push(
             `[${vLast}][v${i}]xfade=transition=fade:duration=${crossfade}:offset=${durations
                 .slice(0, i)
-                .reduce((a, b) => a + b, 0) - crossfade}[vxf${i}]`
+                .reduce((a, b) => a + b, 0) - crossfade * i}[vxf${i}]`
         );
 
         // ---------- AUDIO CROSSFADE ----------

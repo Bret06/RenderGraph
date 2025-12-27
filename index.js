@@ -28,7 +28,7 @@ function askQuestion(query) {
 
     const directoryPrompt = await askQuestion("Please enter the directory of the project > ");
     const directory = videoDirs[Number(directoryPrompt) - 1];
-    const id = await askQuestion("Please enter the id of the project > ");
+    const id = await askQuestion("Please enter the id of the episode > ");
 
     rl.close();
 

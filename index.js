@@ -5,6 +5,9 @@ const ffmpeg = require("fluent-ffmpeg");
 const readline = require("readline");
 const path = require("path");
 
+// Read the config.
+const appConfigPath = require("./config.json");
+
 // Create readline interface
 const rl = readline.createInterface({
     input: process.stdin,
@@ -17,7 +20,7 @@ function askQuestion(query) {
 }
 
 (async () => {
-    const videoDirPath = path.join(__dirname, "..");
+    const videoDirPath = appConfigPath.projects_directory;
 
     const videoDirs = (await fsp.readdir(videoDirPath, { withFileTypes: true }))
         .filter(d => d.isDirectory())
@@ -43,6 +46,13 @@ function askQuestion(query) {
 
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
     const { cuts, fade_duration } = config;
+    config.directory = directory;
+    config.id = id;
+
+    const scriptPath = path.join(videoDirPath, directory, "script.js");
+    if (fs.existsSync(scriptPath)) {
+        await require(scriptPath)(config);
+    }
 
     if (!Array.isArray(cuts) || cuts.length === 0) {
         console.error("❌ Config must include a non-empty cuts array.");
@@ -52,11 +62,6 @@ function askQuestion(query) {
     const fadeIn = fade_duration?.in ?? 0;
     const fadeOut = fade_duration?.out ?? 0;
     const crossfade = fade_duration?.crossfade ?? 0;
-
-    const scriptPath = path.join(__dirname, "..", directory, "script.js");
-    if (fs.existsSync(scriptPath)) {
-        await require(scriptPath)(config);
-    }
 
     function toSeconds(ts) {
         const p = ts.split(":").map(Number);

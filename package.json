@@ -3,6 +3,19 @@
     "fluent-ffmpeg": "^2.1.3",
     "fs": "^0.0.1-security",
     "path": "^0.12.7",
+    "pkg": "^5.8.1",
     "readline": "^1.3.0"
-  }
+  },
+  "name": "edit",
+  "version": "1.0.0",
+  "main": "index.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "compile": "pkg . --targets node18-win-x64 --output edit"
+  },
+  "bin": "./index.js",
+  "author": "",
+  "license": "ISC",
+  "description": ""
 }

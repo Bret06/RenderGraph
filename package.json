@@ -1,5 +1,5 @@
 {
-  "name": "edit",
+  "name": "rendergraph",
   "version": "1.0.0",
   "main": "index.js",
   "bin": "./index.js",
@@ -13,7 +13,7 @@
   "scripts": {
     "compile": "pkg . --targets node18-win-x64 --compress GZip --output rendergraph.exe"
   },
-  "author": "",
+  "author": "Bret06",
   "license": "ISC",
-  "description": ""
+  "description": "A data-driven video rendering tool using FFmpeg."
 }

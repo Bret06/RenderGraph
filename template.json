@@ -10,7 +10,8 @@
       "audio": [
         {
           "id": "voice.wav",
-          "volume": 1.25
+          "volume": 1.25,
+          "offset": "-00:00:05"
         }
       ],
       "start": "00:00:00",

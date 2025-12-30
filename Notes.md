@@ -35,6 +35,7 @@
     - Loop through each audio input for this cut and adjust it's volume and add the fade in/out filters.
     - Combine all the audio tracks into one.
     - In order of index combine each clip together with a crossfade.
+- Compile the video.
 
 # TO-DO:
 - Add a config generation system to allow the script to create a config.json for a video. It will do so by checking for video.mp4 and setting the times accordingly. Ideally, it will also look for mp3s and wavs and auto add them as well. / Ask for the times you want for each clip.

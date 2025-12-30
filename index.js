@@ -5,9 +5,6 @@ const ffmpeg = require("fluent-ffmpeg");
 const readline = require("readline");
 const path = require("path");
 
-// Read the config.
-const appConfigPath = require("./config.json");
-
 // Create readline interface
 const rl = readline.createInterface({
     input: process.stdin,
@@ -20,179 +17,225 @@ function askQuestion(query) {
 }
 
 (async () => {
-    const videoDirPath = appConfigPath.projects_directory;
+    // Read the config file.
+    const appConfigPath = JSON.parse(await fsp.readFile("./config.json"));
 
-    const videoDirs = (await fsp.readdir(videoDirPath, { withFileTypes: true }))
+    // Define the path to the video projects directory.
+    const videoDirectoryPath = appConfigPath.projects_directory;
+
+    // List available directories by filtering for directories only.
+    const videoDirectories = (await fsp.readdir(videoDirectoryPath, { withFileTypes: true }))
         .filter(d => d.isDirectory())
         .map(d => d.name);
-
+    // Prompt user to select a directory.
     console.log("Available directories:");
-    videoDirs.forEach((dir, i) => console.log(`  [${i + 1}] ${dir}`));
-
+    videoDirectories.forEach((dir, i) => console.log(`  [${i + 1}] ${dir}`));
     const directoryPrompt = await askQuestion("Please enter the directory of the project > ");
-    const directory = videoDirs[Number(directoryPrompt) - 1];
+    // Define the selected directory.
+    const directory = videoDirectories[Number(directoryPrompt) - 1];
+
+    // List available episode IDs within each directory.
+    const episodeDirectories = (await fsp.readdir(path.join(videoDirectoryPath, directory), { withFileTypes: true }))
+        .filter(d => d.isDirectory())
+        .map(d => d.name);
+    // Prompt user to select a directory.
+    console.log("Available episodes:");
+    episodeDirectories.forEach((dir) => {
+        // Check if the directory contains a config.json file.
+        const configPath = path.join(videoDirectoryPath, directory, dir, "config.json");
+        if (fs.existsSync(configPath)) {
+            console.log(dir);
+        }
+    });
     const id = await askQuestion("Please enter the id of the episode > ");
 
+    // Close the readline interface.
     rl.close();
 
-    const baseDir = path.join(videoDirPath, directory, id);
-    const output = path.join(baseDir, "output.mp4");
-    const configPath = path.join(baseDir, "config.json");
+    // Define the base directory for the selected project.
+    const baseDirectory = path.join(videoDirectoryPath, directory, id);
+    // Define the output video path.
+    const output = path.join(baseDirectory, "output.mp4");
+    // Define the path to the config.
+    const configPath = path.join(baseDirectory, "config.json");
 
-    if (!fs.existsSync(configPath)) {
-        console.error("❌ Missing config.json!");
-        return;
-    }
-
+    // Parse the config.
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
     const { cuts, fade_duration } = config;
+    // Add directory and id to config. - This is for custom scripts.
     config.directory = directory;
     config.id = id;
 
-    const scriptPath = path.join(videoDirPath, directory, "script.js");
+    // If a custom script.js exists in the project directory, run it.
+    const scriptPath = path.join(videoDirectoryPath, directory, "script.js");
     if (fs.existsSync(scriptPath)) {
         await require(scriptPath)(config);
     }
-
+    // Validate the cuts within the array.
     if (!Array.isArray(cuts) || cuts.length === 0) {
-        console.error("❌ Config must include a non-empty cuts array.");
+        console.error("ERROR > Config must include a non-empty cuts array.");
         return;
     }
 
+    // Define the fade durations with defaults.
     const fadeIn = fade_duration?.in ?? 0;
     const fadeOut = fade_duration?.out ?? 0;
     const crossfade = fade_duration?.crossfade ?? 0;
 
+    // This function is used to convert HH:MM:SS timestamps to seconds.
     function toSeconds(ts) {
         const p = ts.split(":").map(Number);
-        if (p.length !== 3) throw new Error("Timestamp must be HH:MM:SS");
+        if (p.length !== 3) throw new Error("ERROR > Timestamp must be HH:MM:SS");
         return p[0] * 3600 + p[1] * 60 + p[2];
     }
 
+    // Create our ffmpeg command.
     const cmd = ffmpeg();
+    // Create the durations array to hold each cut's duration.
     const durations = [];
+    // Create the cutInputs array to hold each cut's input indices.
     const cutInputs = [];
+    // Create input index counter.
     let inputIndex = 0;
 
-    // ---------------- INPUTS ----------------
+    // Loop through each cut to set up inputs.
     cuts.forEach((cut, i) => {
+        // Validate cut structure.
         if (!cut.video?.id) {
-            throw new Error(`❌ Cut ${i} missing video.id`);
+            throw new Error(`ERROR > Cut ${i} missing video.id`);
         }
 
+        // Define the duration of the cut.
         const start = toSeconds(cut.start);
         const end = toSeconds(cut.end);
-        const dur = end - start;
+        const duration = end - start;
 
-        if (dur <= 0) {
-            throw new Error(`❌ Cut ${i}: end must be after start`);
+        // Make sure duration is valid.
+        if (duration <= 0) {
+            throw new Error(`ERROR > Cut ${i}: end must be after start`);
         }
 
-        durations.push(dur);
+        // Store duration for later.
+        durations.push(duration);
 
-        // 🎬 VIDEO
-        const videoPath = path.join(baseDir, cut.video.id);
+        // Define the path to the video file.
+        const videoPath = path.join(baseDirectory, cut.video.id);
+        // If the video file doesn't exist, throw an error.
         if (!fs.existsSync(videoPath)) {
-            throw new Error(`❌ Cut ${i}: video not found → ${cut.video.id}`);
+            throw new Error(`ERROR > Cut ${i}: video not found → ${cut.video.id}`);
         }
 
+        // Define the video input index.
         const videoIndex = inputIndex++;
-        cmd.input(videoPath).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+        // Add the video input to the ffmpeg command.
+        cmd.input(videoPath).inputOptions([`-ss ${start}`, `-t ${duration}`]);
 
-        // 🎙️ AUDIO — ALWAYS include video audio
+        // Define array to hold audio input indices in order.
         const audioIndices = [];
 
-        // 1️⃣ Video’s embedded audio (base layer)
+        // Add the main video audio track first.
         audioIndices.push(videoIndex);
 
-        // Normalize structure
+        // Make sure the structure of cut.audio is valid.
         if (!Array.isArray(cut.audio)) {
             cut.audio = [];
         }
 
-        // 2️⃣ Extra audio tracks (voice, music, etc.)
+        // Loop through each audio track in the cut.
         cut.audio.forEach(track => {
-            const audioPath = path.join(baseDir, track.id);
+            // Make sure the audio track exists.
+            const audioPath = path.join(baseDirectory, track.id);
             if (!fs.existsSync(audioPath)) {
-                throw new Error(`❌ Cut ${i}: audio not found → ${track.id}`);
+                throw new Error(`ERROR > Cut ${i}: audio not found → ${track.id}`);
             }
 
+            // Define the audio input index.
             audioIndices.push(inputIndex++);
-            cmd.input(audioPath).inputOptions([`-ss ${start}`, `-t ${dur}`]);
+            // Add the audio input to the ffmpeg command.
+            cmd.input(audioPath).inputOptions([`-ss ${start}`, `-t ${duration}`]);
         });
 
-
+        // Store the cut input indices for later.
         cutInputs.push({ videoIndex, audioIndices });
     });
 
-    // ---------------- FILTER GRAPH ----------------
+    // Define the filter array to hold all filter commands.
     const filter = [];
+    // Define variables to hold the most recent video and audio stream labels.
     let vLast = null;
     let aLast = null;
 
+    // Loop through each cut to set up filters.
     cuts.forEach((cut, i) => {
+        // Define the input indices for this cut.
         const { videoIndex, audioIndices } = cutInputs[i];
-        const dur = durations[i];
+        // Grab the first cut's duration.
+        const duration = durations[i];
 
-        // 🎬 VIDEO
+        // Add the fade in/out filters to the cut.
         filter.push(
             `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
             `fade=t=in:st=0:d=${fadeIn},` +
-            `fade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
+            `fade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}` +
             `[v${i}]`
         );
 
-        // 🎙️ AUDIO
-        audioIndices.forEach((aIdx, j) => {
-            const vol =
-                j === 0
-                    ? cut.video.volume ?? 1.0
-                    : cut.audio[j - 1]?.volume ?? 1.0;
-
+        // Loop through each audio input for this cut and adjust it's volume and add the fade in/out filters.
+        audioIndices.forEach((inputIndex, currentAudioStream) => {
+            // Define the volume for this audio stream. If the audio stream's index is 0 then it is the video's audio. Otherwise, it is an external audio track.
+            const volume = currentAudioStream === 0 ? cut.video.volume ?? 1.0 : cut.audio[currentAudioStream - 1]?.volume ?? 1.0;
+            // Add the fade in/out filters to the audio stream.
             filter.push(
-                `[${aIdx}:a]asetpts=PTS-STARTPTS,` +
-                `volume=${vol},` +
+                `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
+                `volume=${volume},` +
                 `afade=t=in:st=0:d=${fadeIn},` +
-                `afade=t=out:st=${Math.max(0, dur - fadeOut)}:d=${fadeOut}` +
-                `[a${i}_${j}]`
+                `afade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}` +
+                `[a${i}_${currentAudioStream}]`
             );
         });
 
-        const mixInputs = audioIndices.map((_, j) => `[a${i}_${j}]`).join("");
+        // Mix all the audio stream labels for this cut together into a single string.
+        const mixInputs = audioIndices.map((_, currentAudioStream) => `[a${i}_${currentAudioStream}]`).join("");
+        // Add the amix filter to mix all audio streams together.
         filter.push(
             `${mixInputs}amix=inputs=${audioIndices.length}:normalize=0[a${i}]`
         );
 
+        // If we are on the first cut, just set the latest video and audio labels.
         if (i === 0) {
             vLast = `v${i}`;
             aLast = `a${i}`;
             return;
         }
 
-        const offset =
-            durations.slice(0, i).reduce((a, b) => a + b, 0) - crossfade * i;
+        // Define the offset of the current clips from the start of the video, adjusted for crossfades.
+        const offset = durations.slice(0, i).reduce((a, b) => a + b, 0) - crossfade * i;
 
+        // Add the current video cut to the previous using a crossfade.
         filter.push(
             `[${vLast}][v${i}]xfade=transition=fade:duration=${crossfade}:offset=${offset}[vxf${i}]`
         );
+        // Add the current audio cut to the previous using a crossfade.
         filter.push(
             `[${aLast}][a${i}]acrossfade=d=${crossfade}[axf${i}]`
         );
 
+        // Update the latest video and audio labels.
         vLast = `vxf${i}`;
         aLast = `axf${i}`;
     });
 
-    // ---------------- OUTPUT ----------------
-
+    // Calculate the total duration of the final video.
     const totalDuration =
         durations.reduce((a, b) => a + b, 0) -
         crossfade * (durations.length - 1);
 
+    // Function to convert timemark (HH:MM:SS.xx) to seconds.
     function timemarkToSeconds(t) {
         const [h, m, s] = t.split(":");
         return (+h) * 3600 + (+m) * 60 + parseFloat(s);
     }
+    // Set up the final output options and start processing.
     cmd
         .complexFilter(filter)
         .outputOptions([
@@ -207,7 +250,7 @@ function askQuestion(query) {
             "-b:a", "320k",
             "-shortest"
         ])
-        .on("start", cmdLine => console.log("▶️ FFmpeg:\n", cmdLine))
+        .on("start", cmdLine => console.log("Exporting Video > \n", cmdLine))
         .on("progress", p => {
             if (!p.timemark) return;
 
@@ -215,10 +258,10 @@ function askQuestion(query) {
             const percent = Math.min(100, (current / totalDuration) * 100);
 
             process.stdout.write(
-                `\rProcessing: ${percent.toFixed(1)}% (${current.toFixed(1)}s / ${totalDuration.toFixed(1)}s)`
+                `\rExporting > ${percent.toFixed(1)}% (${current.toFixed(1)}s / ${totalDuration.toFixed(1)}s)`
             );
         })
-        .on("error", err => console.error("\n❌ FFmpeg error:", err.message))
-        .on("end", () => console.log(`\n✅ Done! Saved as ${output}`))
+        .on("error", err => console.error("\nError >", err.message))
+        .on("end", () => console.log(`\nRender Complete > Saved as ${output}`))
         .save(output);
 })();

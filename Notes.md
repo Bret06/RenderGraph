@@ -21,22 +21,24 @@
 - ``-r`` - Output Framerate, just forces a constant framerate regardless of the video framerate. :)
 - ``-b:a`` - Audio bitrate. Yep, that's it.
 - ``-shortest`` - Stops encoding when the shortest stream ends. Pretty much just says: "End the output when either audio or video runs out."
+- ``areverse`` - Reverses audio.
+- ``apad=pad_dur`` - Adds silence to the end of an audio clip.
+- ``atrim=start=${Math.abs(audioOffset)}`` - Throws away the first "Math.abs(audioOffset)" of the audio.
 
 # Build Events:
 - Create the FFMPEG command.
 - Loop through each cut. - Assembly:
     - Store the duration of the cut in the "durations" array.
     - Add the video to the command.
-    - Add the video's audio track to the "audioIndices" array.
+    - Add the video's audio track to the "audioIndices" array and account for audio offset that will be applied later.
     - Loop through each audio track in the cut and add it to the command.
     - Store the cut input indices for later.
 - Loop through each cut. - Filters:
     - Add the fade in/out filters to the cut.
-    - Loop through each audio input for this cut and adjust it's volume and add the fade in/out filters.
+    - Loop through each audio input for this cut and adjust it's volume, offset, and add the fade in/out filters.
     - Combine all the audio tracks into one.
     - In order of index combine each clip together with a crossfade.
 - Compile the video.
 
 # TO-DO:
 - Add a config generation system to allow the script to create a config.json for a video. It will do so by checking for video.mp4 and setting the times accordingly. Ideally, it will also look for mp3s and wavs and auto add them as well. / Ask for the times you want for each clip.
-- Make it so you can change the offset of audio clips.

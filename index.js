@@ -84,9 +84,14 @@ function askQuestion(query) {
 
     // This function is used to convert HH:MM:SS timestamps to seconds.
     function toSeconds(ts) {
+        let isNegative = false;
+        if (ts.startsWith("-")) {
+            isNegative = true;
+            ts = ts.slice(1);
+        }
         const p = ts.split(":").map(Number);
         if (p.length !== 3) throw new Error("ERROR > Timestamp must be HH:MM:SS");
-        return p[0] * 3600 + p[1] * 60 + p[2];
+        return (isNegative) ? -1 * (p[0] * 3600 + p[1] * 60 + p[2]) : p[0] * 3600 + p[1] * 60 + p[2];
     }
 
     // Create our ffmpeg command.
@@ -149,10 +154,13 @@ function askQuestion(query) {
                 throw new Error(`ERROR > Cut ${i}: audio not found → ${track.id}`);
             }
 
+            // Define the audio offset.
+            const audioOffset = (track.offset) ? toSeconds(track.offset) : 0;
+
             // Define the audio input index.
             audioIndices.push(inputIndex++);
             // Add the audio input to the ffmpeg command.
-            cmd.input(audioPath).inputOptions([`-ss ${start}`, `-t ${duration}`]);
+            cmd.input(audioPath).inputOptions([`-ss ${start}`, `-t ${duration - audioOffset}`]);
         });
 
         // Store the cut input indices for later.
@@ -203,6 +211,9 @@ function askQuestion(query) {
         audioIndices.forEach((inputIndex, currentAudioStream) => {
             // Define the volume for this audio stream. If the audio stream's index is 0 then it is the video's audio. Otherwise, it is an external audio track.
             const volume = currentAudioStream === 0 ? cut.video.volume ?? 1.0 : cut.audio[currentAudioStream - 1]?.volume ?? 1.0;
+            // Define the audio offset.
+            const audioOffset = (cut.audio[currentAudioStream - 1]?.offset) ? toSeconds(cut.audio[currentAudioStream - 1].offset) : 0;
+            const filterOffset = (audioOffset < 0) ? `atrim=start=${Math.abs(audioOffset)},asetpts=PTS-STARTPTS,` : (audioOffset > 0) ? `areverse,apad=pad_dur=${audioOffset}s,areverse,` : "";
             // Add the fade in/out filters to the audio stream as needed.
             switch (i) {
                 case 0:
@@ -210,6 +221,7 @@ function askQuestion(query) {
                     filter.push(
                         `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
                         `volume=${volume},` +
+                        filterOffset +
                         `afade=t=in:st=0:d=${fadeIn}` +
                         `[a${i}_${currentAudioStream}]`
                     );
@@ -219,6 +231,7 @@ function askQuestion(query) {
                     filter.push(
                         `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
                         `volume=${volume},` +
+                        filterOffset +
                         `afade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}` +
                         `[a${i}_${currentAudioStream}]`
                     );
@@ -227,6 +240,7 @@ function askQuestion(query) {
                     // On all other cuts, no fade in/out.
                     filter.push(
                         `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
+                        filterOffset +
                         `volume=${volume}` +
                         `[a${i}_${currentAudioStream}]`
                     );

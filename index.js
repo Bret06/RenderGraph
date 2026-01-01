@@ -46,13 +46,14 @@ function askQuestion(query) {
 
 // Main async function to Initilize the project.
 async function initProject(appConfig) {
-    // Define the config setup.
-    const config = appConfig.default_config
     // Get the directory and id from the user.
     const { directory, id } = await selectProjectAndID(appConfig.projects_directory, false);
     // Define some paths.
     const projectDirectory = path.join(appConfig.projects_directory, directory);
     const episodeDirectory = path.join(projectDirectory, id);
+
+    // Define the config setup.
+    const config = (fs.existsSync(path.join(projectDirectory, "default_config.json"))) ? JSON.parse(await fsp.readFile(path.join(projectDirectory, "default_config.json"))) : appConfig.default_config;
 
     // Create a function that will ask the user what they would like to do.
     async function promptAction() {

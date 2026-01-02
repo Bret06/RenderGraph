@@ -577,78 +577,50 @@ async function renderProject(appConfig, video) {
         // Grab the first cut's duration.
         const duration = durations[i];
 
+        // Define the base filter for this cut.
+        let filterBase = `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
+            `scale=${resolution[0]}:${resolution[1]}:force_original_aspect_ratio=decrease,` +
+            `pad=${resolution[0]}:${resolution[1]}:(ow-iw)/2:(oh-ih)/2`;
         // Set up the video stream with fade in/out filters as needed.
-        switch (i) {
-            case 0:
-                // On the first cut, only apply fade in.
-                filter.push(
-                    `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
-                    `scale=${resolution[0]}:${resolution[1]}:force_original_aspect_ratio=decrease,` +
-                    `pad=${resolution[0]}:${resolution[1]}:(ow-iw)/2:(oh-ih)/2,` +
-                    `fade=t=in:st=0:d=${fadeIn}` +
-                    `[v${i}]`
-                );
-                break;
-            case cuts.length - 1:
-                // On the last cut, only apply fade out.
-                filter.push(
-                    `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
-                    `scale=${resolution[0]}:${resolution[1]}:force_original_aspect_ratio=decrease,` +
-                    `pad=${resolution[0]}:${resolution[1]}:(ow-iw)/2:(oh-ih)/2,` +
-                    `fade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}` +
-                    `[v${i}]`
-                );
-                break;
-            default:
-                // On all other cuts, no fade in/out.
-                filter.push(
-                    `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
-                    `scale=${resolution[0]}:${resolution[1]}:force_original_aspect_ratio=decrease,` +
-                    `pad=${resolution[0]}:${resolution[1]}:(ow-iw)/2:(oh-ih)/2` +
-                    `[v${i}]`
-                );
-                break;
+        if (i === 0) {
+            // On the first cut, only apply fade in.
+            filterBase += `,fade=t=in:st=0:d=${fadeIn}`;
         }
+        if (i === cuts.length - 1) {
+            // On the last cut, only apply fade out.
+            filterBase += `,fade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}`;
+        }
+        // Push the filter for the video stream.
+        filter.push(
+            filterBase +
+            `[v${i}]`
+        );
 
         // Loop through each audio input for this cut and adjust it's volume and add the fade in/out filters.
         audioIndices.forEach((inputIndex, currentAudioStream) => {
             // Define the volume for this audio stream. If the audio stream's index is 0 then it is the video's audio. Otherwise, it is an external audio track.
             const volume = currentAudioStream === 0 ? cut.video.volume ?? 1.0 : cut.audio[currentAudioStream - 1]?.volume ?? 1.0;
             // Define the audio offset.
-            const audioOffset = (cut.audio[currentAudioStream - 1]?.offset) ? toSeconds(cut.audio[currentAudioStream - 1].offset) : 0;
-            const filterOffset = (audioOffset < 0) ? `atrim=start=${Math.abs(audioOffset)},asetpts=PTS-STARTPTS,` : (audioOffset > 0) ? `areverse,apad=pad_dur=${audioOffset}s,areverse,` : "";
+            const audioOffset = currentAudioStream === 0 ? 0 : (cut.audio[currentAudioStream - 1]?.offset) ? toSeconds(cut.audio[currentAudioStream - 1]?.offset) : 0;
+            const filterOffset = (audioOffset < 0) ? `atrim=start=${Math.abs(audioOffset)},asetpts=PTS-STARTPTS,` : (audioOffset > 0) ? `areverse,apad=pad_dur=${audioOffset},areverse,` : "";
+            // Define the base audio filter for this cut.
+            let audioFilterBase = `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
+                filterOffset +
+                `volume=${volume}`;
             // Add the fade in/out filters to the audio stream as needed.
-            switch (i) {
-                case 0:
-                    // On the first cut, only apply fade in.
-                    filter.push(
-                        `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
-                        `volume=${volume},` +
-                        filterOffset +
-                        `afade=t=in:st=0:d=${fadeIn}` +
-                        `[a${i}_${currentAudioStream}]`
-                    );
-                    break;
-                case cuts.length - 1:
-                    // On the last cut, only apply fade out.
-                    filter.push(
-                        `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
-                        `volume=${volume},` +
-                        filterOffset +
-                        `afade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}` +
-                        `[a${i}_${currentAudioStream}]`
-                    );
-                    break;
-                default:
-                    // On all other cuts, no fade in/out.
-                    filter.push(
-                        `[${inputIndex}:a]asetpts=PTS-STARTPTS,` +
-                        filterOffset +
-                        `volume=${volume}` +
-                        `[a${i}_${currentAudioStream}]`
-                    );
-                    break;
+            if (i === 0) {
+                // On the first cut, only apply fade in.
+                audioFilterBase += `,afade=t=in:st=0:d=${fadeIn}`;
             }
+            if (i === cuts.length - 1) {
+                // On the last cut, only apply fade out.
+                audioFilterBase += `,afade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}`;
+            }
+            // Push the filter for the audio stream.
+            filter.push(
+                audioFilterBase +
+                `[a${i}_${currentAudioStream}]`
+            );
         });
 
         // Mix all the audio stream labels for this cut together into a single string.

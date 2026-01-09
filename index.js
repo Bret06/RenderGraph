@@ -66,6 +66,22 @@ async function initProject(appConfig) {
         // Define a list of available actions.
         const actions = [
             {
+                name: "Set FPS",
+                execute: async () => {
+                    // Ask the user for the desired resolution.
+                    const selectedFPS = await askQuestion("Enter the desired FPS > ");
+                    // If the user didn't enter anything, return to the action prompt.
+                    if (!selectedFPS) {
+                        await promptAction();
+                        return;
+                    }
+                    // Set the FPS.
+                    config.fps = parseInt(selectedFPS);
+                    // Return to the action prompt.
+                    await promptAction();
+                }
+            },
+            {
                 name: "Set Resolution",
                 execute: async () => {
                     // Ask the user for the desired resolution.
@@ -458,7 +474,7 @@ async function renderProject(appConfig, video) {
 
     // Parse the config.
     const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const { cuts, fade_duration, resolution } = config;
+    const { cuts, fade_duration, resolution, fps = 60 } = config;
     // Add directory and id to config. - This is for custom scripts.
     config.directory = directory;
     config.id = id;
@@ -580,7 +596,10 @@ async function renderProject(appConfig, video) {
         // Define the base filter for this cut.
         let filterBase = `[${videoIndex}:v]setpts=PTS-STARTPTS,` +
             `scale=${resolution[0]}:${resolution[1]}:force_original_aspect_ratio=decrease,` +
-            `pad=${resolution[0]}:${resolution[1]}:(ow-iw)/2:(oh-ih)/2`;
+            `pad=${resolution[0]}:${resolution[1]}:(ow-iw)/2:(oh-ih)/2,` +
+            `setsar=1,` +
+            `fps=${fps},` +
+            `format=yuv420p`;
         // Set up the video stream with fade in/out filters as needed.
         if (i === 0) {
             // On the first cut, only apply fade in.
